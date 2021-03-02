@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">BTMAP</string>
+    <string name="mapbox_access_token">pk.eyJ1Ijoic21hbGxraW5zIiwiYSI6ImNrbDh2bTZvbzBnNHEybmxidjZjZnR6ajMifQ.kh8o8wr2sLxpy027q-_W6w</string>
+</resources>
