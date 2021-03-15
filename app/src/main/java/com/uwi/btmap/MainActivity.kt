@@ -6,7 +6,8 @@ import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.os.PersistableBundle
 import android.util.Log
-import android.widget.Toast
+import android.view.View
+import android.widget.*
 import androidx.core.content.ContextCompat
 import androidx.core.os.bundleOf
 import com.mapbox.android.core.permissions.PermissionsListener
@@ -14,9 +15,12 @@ import com.mapbox.android.core.permissions.PermissionsManager
 import com.mapbox.api.directions.v5.DirectionsCriteria
 import com.mapbox.api.directions.v5.models.DirectionsRoute
 import com.mapbox.api.directions.v5.models.RouteOptions
+import com.mapbox.geojson.Feature
+import com.mapbox.geojson.FeatureCollection
 import com.mapbox.geojson.LineString
 import com.mapbox.geojson.Point
 import com.mapbox.mapboxsdk.Mapbox
+import com.mapbox.mapboxsdk.annotations.MarkerOptions
 import com.mapbox.mapboxsdk.camera.CameraPosition
 import com.mapbox.mapboxsdk.camera.CameraUpdate
 import com.mapbox.mapboxsdk.camera.CameraUpdateFactory
@@ -48,7 +52,7 @@ class MainActivity :
     AppCompatActivity(),
     OnMapReadyCallback,
     PermissionsListener,
-    MapboxMap.OnMapLongClickListener{
+    MapboxMap.OnMapLongClickListener, AdapterView.OnItemSelectedListener {
 
     private val TAG = "Main Activity"
     
@@ -57,10 +61,20 @@ class MainActivity :
     private var permissionsManager: PermissionsManager = PermissionsManager(this)
     private lateinit var mapboxMap: MapboxMap
 
-    private val ORIGIN_COLOR = "#32A852"
-    private val DESTINATION_COLOR = "#F84D4D"
-
     private var mapView: MapView? = null
+
+    //Locations
+    private var origin: Point? = null
+    private var destination: Point? = null
+    private var passenger: Point? = null
+    private var dropOff: Point? = null
+    private var pickUp : Point? = null
+
+    //test widget location spinner values
+    private var currentSelectedLocation = 0
+    private lateinit var routeButton: Button
+    private lateinit var locationSpinner : Spinner
+    private var locations = arrayOf<String>("driver origin", "driver destination", "passenger origin", "passenger destination")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,17 +82,12 @@ class MainActivity :
 
         setContentView(R.layout.activity_main)
 
-//        mapview reference setup
-        mapView = findViewById(R.id.mapView)
-        mapView?.onCreate(savedInstanceState)
-        mapView?.getMapAsync(this)
+        setupLocationSpinner()
+        setupRouteButton()
 
-//        navigation object setup
-        val mapboxNavigationOptions = MapboxNavigation
-                .defaultNavigationOptionsBuilder(this, getString(R.string.mapbox_access_token))
-                .build()
+        setupMapView(savedInstanceState)
 
-        mapboxNavigation = MapboxNavigation(mapboxNavigationOptions)
+        setupNavigationObject()
 }
 
     override fun onMapReady(mapboxMap: MapboxMap) {
@@ -87,54 +96,61 @@ class MainActivity :
 //            show user location
             enableLocationComponent(it)
 
-//            add sources which are responsible for showing data on the map
-//            click_source for the clicked location marker
-            it.addSource(GeoJsonSource("CLICK_SOURCE"))
-            it.addSource(GeoJsonSource(
-                    "ROUTE_LINE_SOURCE_ID",
-                    GeoJsonOptions().withLineMetrics(true)
-            ))
+            setupMapIcons(it)
 
-            it.addImage("ICON_ID",
-                    BitmapUtils.getBitmapFromDrawable(
-                            ContextCompat.getDrawable(
-                                    this,
-                                    R.drawable.mapbox_marker_icon_default
-                    )
-                )!!
-            )
-
-//            add the layers the sources will be displayed on
-            it.addLayerBelow(
-                    LineLayer("ROUTE_LAYER_ID", "ROUTE_LINE_SOURCE_ID")
-                            .withProperties(
-                                    lineCap(Property.LINE_CAP_ROUND),
-                                    lineJoin(Property.LINE_JOIN_ROUND),
-                                    lineWidth(6f),
-                                    lineOpacity(1f),
-                                    lineColor("#2E4FC9")
-//                                    lineGradient(
-//                                            interpolate(
-//                                                    linear(),
-//                                                    lineProgress(),
-//                                                    stop(0f, color(parseColor(ORIGIN_COLOR))),
-//                                                    stop(1f, color(parseColor(DESTINATION_COLOR)))
-//                                            )
-//                                    )
-                            ),
-                    "mapbox-location-shadow-layer"
-            )
-
-            it.addLayerAbove(
-                    SymbolLayer("CLICK_LAYER","CLICK_SOURCE")
-                            .withProperties(
-                                    iconImage("ICON_ID")
-                            ),
-                    "ROUTE_LAYER_ID"
-            )
+            setupRouteLayer(it)
+            setupLocationMarkerLayers(it)
 
             mapboxMap.addOnMapLongClickListener(this)
         }
+    }
+
+    private fun setupMapIcons(style: Style){
+        style.addImage("ICON_ID",
+                BitmapUtils.getBitmapFromDrawable(
+                        ContextCompat.getDrawable(
+                                this,
+                                R.drawable.mapbox_marker_icon_default
+                        )
+                )!!
+        )
+    }
+
+    private fun setupRouteLayer(style: Style){
+        style.addSource(GeoJsonSource(
+                "ROUTE_LINE_SOURCE_ID",
+                GeoJsonOptions().withLineMetrics(true)
+        ))
+        style.addLayerBelow(
+                LineLayer("ROUTE_LAYER_ID", "ROUTE_LINE_SOURCE_ID")
+                        .withProperties(
+                                lineCap(Property.LINE_CAP_ROUND),
+                                lineJoin(Property.LINE_JOIN_ROUND),
+                                lineWidth(6f),
+                                lineOpacity(1f),
+                                lineColor("#2E4FC9")
+                        ),
+                "mapbox-location-shadow-layer"
+        )
+    }
+
+    private fun setupLocationMarkerLayers(style: Style){
+        setupIconLayerAbove(style,"ORIGIN_SOURCE","ORIGIN_LAYER","ROUTE_LAYER_ID")
+        setupIconLayerBelow(style,"DESTINATION_SOURCE","DESTINATION_LAYER","ORIGIN_LAYER")
+        setupIconLayerBelow(style,"PASSENGER_SOURCE","PASSENGER_LAYER","DESTINATION_LAYER")
+        setupIconLayerBelow(style,"DROP_OFF_SOURCE","DROP_OFF_LAYER","PASSENGER_LAYER")
+    }
+
+    private fun setupIconLayerAbove(style: Style, sourceId : String, layerId : String, aboveLayer : String){
+        style.addSource(GeoJsonSource(sourceId))
+        style.addLayerAbove(SymbolLayer(layerId,sourceId)
+                .withProperties(iconImage("ICON_ID")),aboveLayer)
+    }
+
+    private fun setupIconLayerBelow(style: Style, sourceId : String, layerId : String, aboveLayer : String){
+        style.addSource(GeoJsonSource(sourceId))
+        style.addLayerBelow(SymbolLayer(layerId,sourceId)
+                .withProperties(iconImage("ICON_ID")),aboveLayer)
     }
 
     @SuppressLint("MissingPermission")
@@ -181,7 +197,7 @@ class MainActivity :
     }
 
     override fun onExplanationNeeded(permissionsToExplain: MutableList<String>?) {
-        Toast.makeText(this, "We need location services :/",Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "We need location services >:/",Toast.LENGTH_LONG).show()
     }
 
     override fun onPermissionResult(granted: Boolean) {
@@ -194,35 +210,61 @@ class MainActivity :
     }
 
     override fun onMapLongClick(point: LatLng): Boolean {
-        val destinationLocation: Point = Point.fromLngLat(point.longitude,point.latitude)
+        val selectedPoint: Point = Point.fromLngLat(point.longitude,point.latitude)
+        var sourceId = ""
 
-
-        mapboxMap?.getStyle{
-            val clickPointSource = it.getSourceAs<GeoJsonSource>("CLICK_SOURCE")
-//            set the location of the clicked location marker
-            clickPointSource?.setGeoJson(destinationLocation)
+        if(this.currentSelectedLocation == 0){
+            Toast.makeText(this,"Set origin location",Toast.LENGTH_SHORT).show()
+            this.origin = selectedPoint
+            sourceId = "ORIGIN_SOURCE"
+        }
+        if(this.currentSelectedLocation == 1){
+            Toast.makeText(this,"Set destination location",Toast.LENGTH_SHORT).show()
+            this.destination = selectedPoint
+            sourceId = "DESTINATION_SOURCE"
+        }
+        if(this.currentSelectedLocation == 2){
+            Toast.makeText(this,"Set passenger location",Toast.LENGTH_SHORT).show()
+            this.passenger = selectedPoint
+            sourceId = "PASSENGER_SOURCE"
+        }
+        if(this.currentSelectedLocation == 3){
+            Toast.makeText(this,"Set dropoff location",Toast.LENGTH_SHORT).show()
+            this.dropOff = selectedPoint
+            sourceId = "DROP_OFF_SOURCE"
         }
 
-//        generate the route
-        mapboxMap?.locationComponent?.lastKnownLocation?.let{ originLatLng ->
 
-            val originLocation: Point = Point.fromLngLat(originLatLng.longitude,originLatLng.latitude)
-
-            val routeOptions : RouteOptions = RouteOptions.builder()
-                    .applyDefaultParams()
-                    .accessToken(getString(R.string.mapbox_access_token))
-                    .coordinates(originLocation,null,destinationLocation)
-                    .alternatives(true)
-                    .profile(DirectionsCriteria.PROFILE_DRIVING)
-                    .build()
-
-
-            mapboxNavigation?.requestRoutes(
-                    routeOptions,
-                    routesReqCallback
-            )
+        mapboxMap?.getStyle {
+            updateSource(it,sourceId,selectedPoint)
         }
+
         return true
+    }
+
+    private fun updateSource(style: Style, source_id : String, point: Point){
+        var source = style.getSourceAs<GeoJsonSource>(source_id)
+        source?.setGeoJson(point)
+    }
+
+
+    private fun getRoute(origin : Point, destination : Point, pickup : Point, dropOff : Point ){
+
+        val waypoints = listOf<Point>(pickup, dropOff)
+
+        val routeOptions : RouteOptions = RouteOptions.builder()
+                .applyDefaultParams()
+                .accessToken(getString(R.string.mapbox_access_token))
+                .coordinates(origin,waypoints,destination)
+                .alternatives(true)
+                .profile(DirectionsCriteria.PROFILE_DRIVING)
+                .build()
+
+
+        mapboxNavigation?.requestRoutes(
+                routeOptions,
+                routesReqCallback
+        )
     }
 
     private val routesReqCallback = object : RoutesRequestCallback{
@@ -234,7 +276,6 @@ class MainActivity :
                             routes[0].geometry()!!,
                             6
                     )
-                    Log.d(TAG, "onRoutesReady: routeLineString: "+routeLineString.toString())
 //                    add the returned route to the route line source
                     clickPointSource?.setGeoJson(routeLineString)
                 }
@@ -288,5 +329,46 @@ class MainActivity :
         mapView?.onDestroy()
     }
 
+    override fun onNothingSelected(p0: AdapterView<*>?) {
+    }
 
+    override fun onItemSelected(parent : AdapterView<*>?,
+                                view : View, position: Int, id : Long){
+//        set variable to represent what item is selected
+        currentSelectedLocation = position
+    }
+
+    private fun setupMapView(savedInstanceState: Bundle?){
+        this.mapView = findViewById(R.id.mapView)
+        this.mapView?.onCreate(savedInstanceState)
+        this.mapView?.getMapAsync(this)
+    }
+
+    private fun setupNavigationObject(){
+        val mapboxNavigationOptions = MapboxNavigation
+                .defaultNavigationOptionsBuilder(this, getString(R.string.mapbox_access_token))
+                .build()
+
+        this.mapboxNavigation = MapboxNavigation(mapboxNavigationOptions)
+    }
+
+    private fun setupRouteButton(){
+        this.routeButton = findViewById<Button>(R.id.route_button)
+        this.routeButton.setOnClickListener{
+            if (this.origin!=null && this.destination!=null && this.passenger!=null && this.dropOff!=null) {
+                getRoute(this.origin!!,this.destination!!,this.passenger!!,this.dropOff!!)
+            }
+        }
+    }
+
+    private fun setupLocationSpinner(){
+        this.locationSpinner = findViewById<Spinner>(R.id.location_spinner)
+
+        this.locationSpinner.onItemSelectedListener = this
+
+        val adapter : ArrayAdapter<*> = ArrayAdapter<Any?>(this, android.R.layout.simple_spinner_item, locations)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+
+        this.locationSpinner.adapter = adapter
+    }
 }
